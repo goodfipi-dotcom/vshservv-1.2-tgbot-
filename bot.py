@@ -21,6 +21,7 @@ TOKEN         = os.getenv("TG_BOT_TOKEN", "8796585755:AAH3inuCnhQfKI7rT-AEh1zNfO
 OWNER_CHAT_ID = int(os.getenv("OWNER_CHAT_ID", "7693616720"))
 MINI_APP_URL  = os.getenv("MINI_APP_URL", "https://mini-appsvsh.vercel.app")
 API_BASE      = os.getenv("API_BASE",     "https://mini-appsvsh.vercel.app")
+CLIENT_URL    = os.getenv("CLIENT_URL",   "https://mini-appsvsh.vercel.app/client.html")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -67,6 +68,62 @@ user_roles               = {}
 banned_users             = set()
 
 request_lock = threading.Lock()
+
+# ─────────────────────────────────────────
+# АНТИСПАМ
+# Лимит: 5 сообщений за 10 секунд → мут
+# Мут нарастает: 1 час → 2 часа → 3 часа...
+# Админ (OWNER) не подвержен антиспаму
+# ─────────────────────────────────────────
+SPAM_WINDOW     = 10      # секунд — окно отслеживания
+SPAM_LIMIT      = 5       # макс. сообщений в окне
+BASE_MUTE_SECS  = 3600    # 1 час — базовый мут
+
+spam_tracker = {}  # chat_id -> {"timestamps": [...], "mute_until": float, "mute_count": int}
+
+def check_spam(chat_id):
+    """Проверяет спам. Возвращает True если пользователь замучен."""
+    if chat_id == OWNER_CHAT_ID:
+        return False  # Админ не блокируется
+
+    now = time.time()
+
+    if chat_id not in spam_tracker:
+        spam_tracker[chat_id] = {"timestamps": [], "mute_until": 0, "mute_count": 0}
+
+    rec = spam_tracker[chat_id]
+
+    # Если пользователь в муте — проверяем истёк ли
+    if rec["mute_until"] > now:
+        remaining = int((rec["mute_until"] - now) / 60)
+        return True  # Всё ещё замучен
+
+    # Фильтруем старые timestamps (оставляем только за последние SPAM_WINDOW секунд)
+    rec["timestamps"] = [t for t in rec["timestamps"] if now - t < SPAM_WINDOW]
+    rec["timestamps"].append(now)
+
+    # Проверяем лимит
+    if len(rec["timestamps"]) > SPAM_LIMIT:
+        rec["mute_count"] += 1
+        mute_secs = BASE_MUTE_SECS * rec["mute_count"]  # 1ч, 2ч, 3ч и т.д.
+        rec["mute_until"] = now + mute_secs
+        hours = mute_secs // 3600
+
+        try:
+            bot.send_message(
+                chat_id,
+                f"⛔ <b>Антиспам:</b> вы отправляете слишком много сообщений.\n"
+                f"Бот заблокирован для вас на <b>{hours} ч.</b>\n\n"
+                f"При повторном нарушении время блокировки увеличится.",
+                parse_mode="HTML"
+            )
+        except:
+            pass
+
+        logger.warning("Антиспам: замучен %s на %d сек (нарушение #%d)", chat_id, mute_secs, rec["mute_count"])
+        return True
+
+    return False
 
 # ─────────────────────────────────────────
 # УТИЛИТЫ
@@ -259,6 +316,10 @@ def handle_message(message):
     if is_banned(chat_id):
         return
 
+    # ── АНТИСПАМ (добавлено) ──
+    if check_spam(chat_id):
+        return
+
     # ── ВЛАДЕЛЕЦ ──
     if chat_id == OWNER_CHAT_ID:
         _handle_owner(message, text, key)
@@ -297,11 +358,10 @@ def handle_message(message):
         return
 
     if text == "🌐 Оставить заявку на сайте":
-        # TODO: заменить на реальный URL сайта заказчиков когда будет готов
         bot.send_message(
             chat_id,
-            "🌐 Сайт для заказчиков скоро будет готов!\n\n"
-            "А пока вы можете оставить заявку через техподдержку — нажмите 🆘",
+            f"🌐 <b>Оставить заявку:</b>\n{CLIENT_URL}\n\n"
+            f"Заполните форму на сайте — мы свяжемся в течение 15 минут!",
             parse_mode="HTML"
         )
         return
