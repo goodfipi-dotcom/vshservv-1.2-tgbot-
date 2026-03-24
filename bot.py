@@ -176,14 +176,14 @@ def worker_main_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     kb.add(KeyboardButton("🚀 Открыть приложение"), KeyboardButton("ℹ️ О сервисе"))
     kb.add(KeyboardButton("🔔 Включить уведомления"), KeyboardButton("🏆 Мой рейтинг"))
-    kb.add(KeyboardButton("🆘 Техподдержка"))
+    kb.add(KeyboardButton("🆘 Техподдержка"), KeyboardButton("↩️ Сменить роль"))
     return kb
 
 def customer_main_kb():
-    kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     kb.add(KeyboardButton("🌐 Оставить заявку на сайте"))
-    kb.add(KeyboardButton("ℹ️ О сервисе"))
-    kb.add(KeyboardButton("🆘 Техподдержка"))
+    kb.add(KeyboardButton("ℹ️ О сервисе"), KeyboardButton("🆘 Техподдержка"))
+    kb.add(KeyboardButton("↩️ Сменить роль"))
     return kb
 
 def owner_menu_kb():
@@ -360,8 +360,9 @@ def handle_message(message):
     if text == "🌐 Оставить заявку на сайте":
         bot.send_message(
             chat_id,
-            f"🌐 <b>Оставить заявку:</b>\n{CLIENT_URL}\n\n"
-            f"Заполните форму на сайте — мы свяжемся в течение 15 минут!",
+            f"🌐 <b>Заказать рабочих:</b>\n\n"
+            f"👉 {CLIENT_URL}\n\n"
+            f"Заполните форму — мы подберём исполнителя и перезвоним в течение 15 минут!",
             parse_mode="HTML"
         )
         return
@@ -403,6 +404,15 @@ def handle_message(message):
     if text == "🆘 Техподдержка":
         msg = bot.send_message(chat_id, "🆘 Опишите вашу проблему или вопрос одним сообщением:")
         bot.register_next_step_handler(msg, support_handler)
+        return
+
+    if text == "↩️ Сменить роль":
+        user_roles.pop(chat_id, None)
+        bot.send_message(
+            chat_id,
+            "🔄 Роль сброшена. Выберите заново:",
+            reply_markup=role_select_kb()
+        )
         return
 
     # Если роль не выбрана
