@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 bot = telebot.TeleBot(TOKEN, threaded=True, skip_pending=True)
 
 # ─────────────────────────────────────────
-# ФАЙЛЫ ХРАНЕНИЯ (JSON — для совместимости с Puzzle Bot)
+# ФАЙЛЫ ХРАНЕНИЯ
 # ─────────────────────────────────────────
 RATINGS_FILE = "ratings.json"
 WORKERS_FILE = "workers.json"
@@ -63,7 +63,7 @@ workers_stream_active = set(int(x) for x in _wlist if str(x).isdigit())
 pending_admin_replies    = {}
 pending_admin_direct     = {}
 pending_admin_broadcast  = set()
-user_roles               = {}   # chat_id -> "worker" | "customer"
+user_roles               = {}
 banned_users             = set()
 
 request_lock = threading.Lock()
@@ -100,7 +100,6 @@ def register_user(user):
     return k
 
 def api_post(endpoint, data):
-    """Отправить данные в Vercel API."""
     try:
         r = requests.post(f"{API_BASE}{endpoint}", json=data, timeout=10)
         return r.json()
@@ -118,20 +117,16 @@ def role_select_kb():
 
 def worker_main_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    btn_app = KeyboardButton("🚀 Открыть приложение")
-    btn_info = KeyboardButton("ℹ️ О сервисе")
-    btn_stats = KeyboardButton("🏆 Мой рейтинг")
-    btn_stream = KeyboardButton("🔔 Включить поток заявок")
-    btn_support = KeyboardButton("🆘 Техподдержка")
-    kb.add(btn_app, btn_info)
-    kb.add(btn_stream, btn_stats)
-    kb.add(btn_support)
+    kb.add(KeyboardButton("🚀 Открыть приложение"), KeyboardButton("ℹ️ О сервисе"))
+    kb.add(KeyboardButton("🔔 Включить уведомления"), KeyboardButton("🏆 Мой рейтинг"))
+    kb.add(KeyboardButton("🆘 Техподдержка"))
     return kb
 
 def customer_main_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     kb.add(KeyboardButton("🌐 Оставить заявку на сайте"))
     kb.add(KeyboardButton("ℹ️ О сервисе"))
+    kb.add(KeyboardButton("🆘 Техподдержка"))
     return kb
 
 def owner_menu_kb():
@@ -142,12 +137,21 @@ def owner_menu_kb():
     kb.add(KeyboardButton("ℹ️ О сервисе"))
     return kb
 
-def open_app_inline_kb(role="worker"):
+def open_app_inline_kb():
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton(
         "🚀 Открыть VSH Service",
         web_app=telebot.types.WebAppInfo(url=MINI_APP_URL)
     ))
+    return kb
+
+def city_select_kb():
+    """Выбор города при публикации заказа."""
+    kb = InlineKeyboardMarkup()
+    kb.row(
+        InlineKeyboardButton("📍 Октябрьский", callback_data="pub_city:Октябрьский"),
+        InlineKeyboardButton("📍 Туймазы",     callback_data="pub_city:Туймазы")
+    )
     return kb
 
 def accept_order_inline(order_id):
@@ -161,7 +165,7 @@ def confirm_order_inline(order_id):
         InlineKeyboardButton("🟢 Еду на заявку",    callback_data=f"confirm:{order_id}"),
         InlineKeyboardButton("🔴 Отказываюсь",      callback_data=f"decline:{order_id}")
     )
-    kb.add(InlineKeyboardButton("🆘 Техподдержка", callback_data=f"support_inline:{order_id}"))
+    kb.add(InlineKeyboardButton("🆘 Связаться с админом", callback_data=f"support_inline:{order_id}"))
     return kb
 
 def owner_order_inline(order_id):
@@ -185,20 +189,36 @@ def stats_nav_kb(page, total_pages):
     return kb
 
 # ─────────────────────────────────────────
-# ТЕКСТ О СЕРВИСЕ
+# ТЕКСТ О СЕРВИСЕ (два варианта)
 # ─────────────────────────────────────────
-ABOUT_TEXT = (
-    "🔧 <b>VSH Service — Октябрьский</b>\n\n"
-    "Сервис быстрого найма рабочих, грузчиков и мастеров.\n\n"
-    "⚡ <b>Для заказчиков:</b>\n"
+ABOUT_WORKER = (
+    "🔧 <b>VSH Service — Октябрьский · Туймазы</b>\n\n"
+    "Платформа для рабочих: грузчики, мастера, разнорабочие.\n\n"
+    "👷 <b>Как это работает:</b>\n"
+    "• Получаете уведомление о новой заявке\n"
+    "• Открываете приложение и принимаете заказ\n"
+    "• Звоните заказчику и едете на объект\n"
+    "• Выполняете работу и получаете оплату\n\n"
+    "⭐ <b>Рейтинг и звания:</b>\n"
+    "За каждый заказ вы получаете звёзды. Чем больше звёзд — "
+    "тем выше звание и доступ к лучшим заявкам.\n\n"
+    "💰 <b>Без посредников:</b>\n"
+    "Вся оплата идёт напрямую вам от заказчика.\n\n"
+    "🆘 По вопросам: кнопка «Техподдержка»"
+)
+
+ABOUT_CUSTOMER = (
+    "🔧 <b>VSH Service — Октябрьский · Туймазы</b>\n\n"
+    "Быстрый найм рабочих, грузчиков и мастеров.\n\n"
+    "⚡ <b>Как заказать:</b>\n"
     "• Оставляете заявку на сайте\n"
-    "• Диспетчер перезванивает в течение 15 минут\n"
-    "• Бригада прибывает за 60 минут\n\n"
-    "👷 <b>Для исполнителей:</b>\n"
-    "• Работаете через приложение\n"
-    "• Берёте заявки онлайн\n"
-    "• Получаете оплату день в день\n\n"
-    "📞 По вопросам: @vsh_support"
+    "• Мы подбираем исполнителя за 15 минут\n"
+    "• Рабочий перезвонит и приедет\n\n"
+    "✅ <b>Наши преимущества:</b>\n"
+    "• Цены ниже чем на Авито\n"
+    "• Проверенные исполнители с рейтингом\n"
+    "• Бригада — не один человек\n\n"
+    "🆘 По вопросам: кнопка «Техподдержка»"
 )
 
 # ─────────────────────────────────────────
@@ -220,7 +240,9 @@ def cmd_start(message):
 
     bot.send_message(
         chat_id,
-        "👋 Добро пожаловать в <b>VSH Service</b>!\n\nКто вы?",
+        "👋 Добро пожаловать в <b>VSH Service</b>!\n\n"
+        "Мы помогаем найти работу и нанять рабочих "
+        "в Октябрьском и Туймазах.\n\nКто вы?",
         parse_mode="HTML",
         reply_markup=role_select_kb()
     )
@@ -237,18 +259,21 @@ def handle_message(message):
     if is_banned(chat_id):
         return
 
-    # ── ВЛАДЕЛЕЦ ──────────────────────────────────────
+    # ── ВЛАДЕЛЕЦ ──
     if chat_id == OWNER_CHAT_ID:
         _handle_owner(message, text, key)
         return
 
-    # ── ВЫБОР РОЛИ ────────────────────────────────────
+    # ── ВЫБОР РОЛИ ──
     if text == "👷 Я исполнитель":
         user_roles[chat_id] = "worker"
+        workers_stream_active.add(chat_id)
+        save_all()
         bot.send_message(
             chat_id,
-            "✅ <b>Режим исполнителя активирован</b>\n\n"
-            "Нажмите «🚀 Открыть приложение» чтобы начать брать заявки.",
+            "✅ <b>Режим исполнителя активирован!</b>\n\n"
+            "🔔 Уведомления о новых заявках включены автоматически.\n\n"
+            "Нажмите «🚀 Открыть приложение» чтобы войти в систему.",
             parse_mode="HTML",
             reply_markup=worker_main_kb()
         )
@@ -258,67 +283,69 @@ def handle_message(message):
         user_roles[chat_id] = "customer"
         bot.send_message(
             chat_id,
-            "✅ <b>Вы выбрали режим заказчика</b>\n\n"
-            "Для заказа рабочих перейдите на наш сайт:",
+            "✅ <b>Вы — заказчик</b>\n\n"
+            "Для заказа рабочих перейдите на наш сайт.\n"
+            "Если сайт ещё не готов — напишите в техподдержку, мы примем заявку вручную.",
             parse_mode="HTML",
             reply_markup=customer_main_kb()
         )
-        bot.send_message(
-            chat_id,
-            f"🌐 <b>Сайт для заказа:</b>\n{MINI_APP_URL}",
-            parse_mode="HTML"
-        )
         return
 
-    # ── КНОПКИ РАБОЧЕГО ───────────────────────────────
+    # ── ОБЩИЕ КНОПКИ ──
     if text == "🚀 Открыть приложение":
-        bot.send_message(
-            chat_id,
-            "Нажмите кнопку ниже 👇",
-            reply_markup=open_app_inline_kb()
-        )
+        bot.send_message(chat_id, "Нажмите кнопку ниже 👇", reply_markup=open_app_inline_kb())
         return
 
     if text == "🌐 Оставить заявку на сайте":
+        # TODO: заменить на реальный URL сайта заказчиков когда будет готов
         bot.send_message(
             chat_id,
-            f"🌐 Перейдите на сайт для оформления заявки:\n{MINI_APP_URL}",
+            "🌐 Сайт для заказчиков скоро будет готов!\n\n"
+            "А пока вы можете оставить заявку через техподдержку — нажмите 🆘",
             parse_mode="HTML"
         )
         return
 
     if text == "ℹ️ О сервисе":
-        bot.send_message(chat_id, ABOUT_TEXT, parse_mode="HTML")
+        role = user_roles.get(chat_id)
+        if role == "worker":
+            bot.send_message(chat_id, ABOUT_WORKER, parse_mode="HTML")
+        elif role == "customer":
+            bot.send_message(chat_id, ABOUT_CUSTOMER, parse_mode="HTML")
+        else:
+            bot.send_message(chat_id, ABOUT_WORKER, parse_mode="HTML")
         return
 
     if text == "🏆 Мой рейтинг":
         score = ratings.get(key, {}).get("score", 0)
         bot.send_message(
             chat_id,
-            f"⭐ <b>Ваш рейтинг:</b> {score}/1000",
+            f"⭐ <b>Ваш рейтинг:</b> {score} звёзд\n\n"
+            f"Выполняйте заявки чтобы расти в рейтинге!",
             parse_mode="HTML"
         )
         return
 
-    if text == "🔔 Включить поток заявок":
+    if text == "🔔 Включить уведомления":
         if chat_id in workers_stream_active:
-            bot.send_message(chat_id, "✅ Поток заявок уже активирован. Ждите новых заданий.")
+            bot.send_message(chat_id, "✅ Уведомления уже включены. Ждите новых заявок!")
         else:
             workers_stream_active.add(chat_id)
             save_all()
             bot.send_message(
                 chat_id,
-                "🔔 <b>Поток заявок включён!</b>\nВы будете получать уведомления о новых заказах.",
+                "🔔 <b>Уведомления включены!</b>\n"
+                "Вы будете получать сообщения о новых заказах.",
                 parse_mode="HTML"
             )
         return
 
     if text == "🆘 Техподдержка":
-        msg = bot.send_message(chat_id, "🆘 Опишите проблему или вопрос:")
+        msg = bot.send_message(chat_id, "🆘 Опишите вашу проблему или вопрос одним сообщением:")
         bot.register_next_step_handler(msg, support_handler)
         return
 
-    # Если роль не выбрана — предлагаем выбрать
+    # Если роль не выбрана
     if chat_id not in user_roles:
         bot.send_message(chat_id, "Выберите вашу роль:", reply_markup=role_select_kb())
 
@@ -344,10 +371,11 @@ def _handle_owner(message, text, key):
         sent = 0
         for wid in list(workers_stream_active):
             try:
-                bot.send_message(int(wid), f"📢 <b>Сообщение от администрации:</b>\n\n{text}", parse_mode="HTML")
+                bot.send_message(int(wid), f"📢 <b>Сообщение от VSH Service:</b>\n\n{text}", parse_mode="HTML")
                 sent += 1
             except:
-                pass
+                workers_stream_active.discard(int(wid))
+        save_all()
         bot.send_message(chat_id, f"✅ Рассылка выполнена. Отправлено: {sent}")
         return
 
@@ -361,9 +389,10 @@ def _handle_owner(message, text, key):
             bot.send_message(chat_id, "❌ Не удалось отправить ответ")
         return
 
+    # ── КНОПКИ АДМИНА ──
+
     if text == "📋 Опубликовать заказ":
-        msg = bot.send_message(chat_id, "📍 Введите адрес и описание задачи:")
-        bot.register_next_step_handler(msg, owner_step_price)
+        bot.send_message(chat_id, "📍 <b>Выберите город:</b>", parse_mode="HTML", reply_markup=city_select_kb())
         return
 
     if text == "🚀 Открыть приложение":
@@ -379,8 +408,9 @@ def _handle_owner(message, text, key):
         return
 
     if text == "📣 Рассылка всем":
+        count = len(workers_stream_active)
         pending_admin_broadcast.add(chat_id)
-        bot.send_message(chat_id, "📣 Введите текст рассылки для всех активных рабочих:")
+        bot.send_message(chat_id, f"📣 Введите текст рассылки.\nПолучателей: {count} рабочих.")
         return
 
     if text == "📨 Написать рабочему":
@@ -391,103 +421,184 @@ def _handle_owner(message, text, key):
         kb = InlineKeyboardMarkup()
         for wid in all_ids[:30]:
             label = users.get(str(wid), str(wid))[:25]
-            kb.add(InlineKeyboardButton(label, callback_data=f"owner_direct:{wid}"))
+            active = "🟢" if wid in workers_stream_active else "⚪"
+            kb.add(InlineKeyboardButton(f"{active} {label}", callback_data=f"owner_direct:{wid}"))
         bot.send_message(chat_id, "Выберите рабочего:", reply_markup=kb)
         return
 
     if text == "ℹ️ О сервисе":
-        bot.send_message(chat_id, ABOUT_TEXT, parse_mode="HTML")
+        bot.send_message(chat_id, ABOUT_WORKER, parse_mode="HTML")
         return
 
 # ─────────────────────────────────────────
-# ВЛАДЕЛЕЦ: публикация заказа (3 шага)
+# ПУБЛИКАЦИЯ ЗАКАЗА (через бота, 4 шага)
+# Город → Задача → Адрес+Телефон → Кол-во рабочих
+# Без маржи — модель без посредников
 # ─────────────────────────────────────────
-def owner_step_price(message):
-    temp = {"address": message.text.strip()}
-    msg = bot.send_message(message.chat.id, "💰 Ставка для клиента (₽):")
-    bot.register_next_step_handler(msg, owner_step_margin, temp)
+publish_temp = {}  # chat_id -> dict с данными формы
 
-def owner_step_margin(message, temp):
-    try:
-        temp["client_price"] = int(re.sub(r'\D', '', message.text))
-    except:
-        bot.send_message(message.chat.id, "❌ Введите число. Попробуйте снова.")
-        msg = bot.send_message(message.chat.id, "💰 Ставка для клиента (₽):")
-        bot.register_next_step_handler(msg, owner_step_margin, temp)
-        return
-    msg = bot.send_message(message.chat.id, "📊 Ваша маржа (₽), например 200:")
-    bot.register_next_step_handler(msg, owner_step_workers, temp)
-
-def owner_step_workers(message, temp):
-    try:
-        temp["margin"] = int(re.sub(r'\D', '', message.text))
-    except:
-        temp["margin"] = 200
-    temp["worker_price"] = temp["client_price"] - temp["margin"]
-    if temp["worker_price"] <= 0:
-        bot.send_message(message.chat.id, "❌ Ставка меньше маржи. Начните заново.")
-        return
-    msg = bot.send_message(message.chat.id, "👷 Сколько рабочих нужно (число):")
-    bot.register_next_step_handler(msg, owner_publish_order, temp)
-
-def owner_publish_order(message, temp):
+def pub_step_task(message):
+    """Шаг 2: Задача / описание."""
     chat_id = message.chat.id
-    try:
-        temp["workers_needed"] = int(re.sub(r'\D', '', message.text))
-    except:
-        temp["workers_needed"] = 1
+    text = (message.text or "").strip()
+    if not text:
+        msg = bot.send_message(chat_id, "❌ Пустое сообщение. Введите описание задачи:")
+        bot.register_next_step_handler(msg, pub_step_task)
+        return
+    publish_temp[chat_id]["task"] = text
+    msg = bot.send_message(chat_id, "📍 Введите <b>адрес</b> (улица, дом):", parse_mode="HTML")
+    bot.register_next_step_handler(msg, pub_step_address)
 
-    # Публикуем через Vercel API
+def pub_step_address(message):
+    """Шаг 3: Адрес."""
+    chat_id = message.chat.id
+    text = (message.text or "").strip()
+    if not text:
+        msg = bot.send_message(chat_id, "❌ Введите адрес:")
+        bot.register_next_step_handler(msg, pub_step_address)
+        return
+    publish_temp[chat_id]["address"] = text
+    msg = bot.send_message(chat_id, "📞 Введите <b>телефон заказчика</b>:", parse_mode="HTML")
+    bot.register_next_step_handler(msg, pub_step_phone)
+
+def pub_step_phone(message):
+    """Шаг 4: Телефон."""
+    chat_id = message.chat.id
+    text = (message.text or "").strip()
+    if not text:
+        msg = bot.send_message(chat_id, "❌ Введите телефон:")
+        bot.register_next_step_handler(msg, pub_step_phone)
+        return
+    publish_temp[chat_id]["phone"] = text
+    msg = bot.send_message(
+        chat_id,
+        "👷 Сколько рабочих нужно? (число, по умолчанию 1)\n\n"
+        "Или напишите <b>комментарий</b> через запятую, например: <code>2, нужен инструмент</code>",
+        parse_mode="HTML"
+    )
+    bot.register_next_step_handler(msg, pub_step_workers)
+
+def pub_step_workers(message):
+    """Шаг 5: Количество рабочих + комментарий → публикация."""
+    chat_id = message.chat.id
+    text = (message.text or "").strip()
+
+    workers_needed = 1
+    comment = ""
+
+    if "," in text:
+        parts = text.split(",", 1)
+        try:
+            workers_needed = max(1, int(re.sub(r'\D', '', parts[0])))
+        except:
+            workers_needed = 1
+        comment = parts[1].strip()
+    else:
+        try:
+            workers_needed = max(1, int(re.sub(r'\D', '', text)))
+        except:
+            workers_needed = 1
+
+    temp = publish_temp.pop(chat_id, {})
+    if not temp:
+        bot.send_message(chat_id, "❌ Данные формы потеряны. Начните заново.", reply_markup=owner_menu_kb())
+        return
+
+    temp["workers_needed"] = workers_needed
+    temp["comment"] = comment
+
+    # Показываем превью
+    preview = (
+        f"📋 <b>Превью заявки:</b>\n\n"
+        f"📍 {temp['city']}\n"
+        f"🔧 {temp['task']}\n"
+        f"🏠 {temp['address']}\n"
+        f"📞 {temp['phone']}\n"
+        f"👷 Рабочих: {workers_needed}\n"
+    )
+    if comment:
+        preview += f"💬 {comment}\n"
+
+    preview += "\nОпубликовать?"
+
+    # Сохраняем для подтверждения
+    publish_temp[chat_id] = temp
+
+    kb = InlineKeyboardMarkup()
+    kb.row(
+        InlineKeyboardButton("✅ Опубликовать", callback_data="pub_confirm"),
+        InlineKeyboardButton("❌ Отменить",     callback_data="pub_cancel")
+    )
+    bot.send_message(chat_id, preview, parse_mode="HTML", reply_markup=kb)
+
+def _do_publish(chat_id):
+    """Публикация заказа в БД и рассылка рабочим."""
+    temp = publish_temp.pop(chat_id, {})
+    if not temp:
+        bot.send_message(chat_id, "❌ Данные формы потеряны.", reply_markup=owner_menu_kb())
+        return
+
+    # Отправляем в Vercel API → сохраняется в Neon БД
     result = api_post("/api/order", {
         "source":         "admin",
-        "service":        temp["address"],
+        "service":        temp["task"],
         "address":        temp["address"],
-        "client_price":   temp["client_price"],
-        "worker_price":   temp["worker_price"],
-        "margin":         temp["margin"],
+        "phone":          temp["phone"],
+        "city":           temp["city"],
+        "comment":        temp.get("comment", ""),
         "workers_needed": temp["workers_needed"],
-        "status":         "published"
     })
 
     if result.get("success") or result.get("orderId"):
         order_id = result.get("orderId", "?")
+
         bot.send_message(
             chat_id,
             f"✅ <b>Заказ №{order_id} опубликован!</b>\n\n"
-            f"🔧 {temp['address']}\n"
-            f"💰 Клиент: {temp['client_price']}₽ | Рабочим: {temp['worker_price']}₽ | Маржа: {temp['margin']}₽\n"
-            f"👷 Нужно: {temp['workers_needed']} чел.\n\n"
-            f"Рабочие получили уведомления в Telegram.",
+            f"📍 {temp['city']}\n"
+            f"🔧 {temp['task']}\n"
+            f"🏠 {temp['address']}\n"
+            f"📞 {temp['phone']}\n"
+            f"👷 Рабочих: {temp['workers_needed']}",
             parse_mode="HTML",
             reply_markup=owner_menu_kb()
         )
-        # Также рассылаем через бота рабочим с кнопкой
-        _broadcast_order_to_workers(order_id, temp["address"], temp["worker_price"])
+
+        # Рассылаем рабочим (только через бота, не через API)
+        _broadcast_order_to_workers(order_id, temp)
     else:
         bot.send_message(
             chat_id,
-            f"⚠️ Заказ создан, но API вернул ошибку: {result.get('error', 'неизвестно')}\n"
-            f"Проверьте Vercel и базу данных.",
+            f"⚠️ Ошибка API: {result.get('error', 'неизвестно')}\n"
+            f"Проверьте Vercel.",
             reply_markup=owner_menu_kb()
         )
 
-def _broadcast_order_to_workers(order_id, address, worker_price):
-    """Рассылаем уведомление рабочим через бота с inline-кнопкой."""
+def _broadcast_order_to_workers(order_id, temp):
+    """Рассылка уведомлений рабочим через бота."""
+    sent = 0
+    failed = 0
     for wid in list(workers_stream_active):
         try:
             bot.send_message(
                 int(wid),
-                f"🔥 <b>НОВЫЙ ЗАКАЗ #{order_id}</b>\n\n"
-                f"🔧 {address}\n"
-                f"💰 Ставка: {worker_price}₽\n\n"
-                f"Нажмите кнопку чтобы открыть приложение и принять заказ:",
+                f"🔥 <b>НОВАЯ ЗАЯВКА №{order_id}</b>\n\n"
+                f"📍 {temp['city']}\n"
+                f"🔧 {temp['task']}\n"
+                f"🏠 {temp['address']}\n"
+                f"👷 Нужно рабочих: {temp['workers_needed']}\n"
+                + (f"💬 {temp['comment']}\n" if temp.get('comment') else "")
+                + f"\nОткройте приложение чтобы принять заказ:",
                 parse_mode="HTML",
                 reply_markup=open_app_inline_kb()
             )
+            sent += 1
         except Exception as e:
             logger.debug("Не удалось отправить рабочему %s: %s", wid, e)
             workers_stream_active.discard(int(wid))
+            failed += 1
     save_all()
+    logger.info("Рассылка заказа #%s: отправлено %d, ошибок %d", order_id, sent, failed)
 
 # ─────────────────────────────────────────
 # ТЕХПОДДЕРЖКА
@@ -502,13 +613,14 @@ def support_handler(message):
     try:
         kb = InlineKeyboardMarkup()
         kb.add(InlineKeyboardButton("✉️ Ответить", callback_data=f"support_reply:{worker_id}"))
+        role = user_roles.get(worker_id, "неизвестно")
         bot.send_message(
             OWNER_CHAT_ID,
-            f"📩 <b>Техподдержка</b> от {worker_key} (id: {worker_id}):\n\n{text}",
+            f"📩 <b>Техподдержка</b> от {worker_key} ({role})\nid: <code>{worker_id}</code>\n\n{text}",
             parse_mode="HTML",
             reply_markup=kb
         )
-        bot.send_message(worker_id, "✅ Сообщение отправлено. Ожидайте ответа администратора.")
+        bot.send_message(worker_id, "✅ Сообщение отправлено администратору. Ожидайте ответа.")
     except Exception as e:
         logger.exception("support_handler error: %s", e)
         bot.send_message(worker_id, "❌ Ошибка. Попробуйте позже.")
@@ -524,10 +636,48 @@ def callback_handler(call):
 
     bot.answer_callback_query(call.id)
 
-    # Одобрить заявку клиента (владелец)
+    # ── Публикация: выбор города ──
+    if data.startswith("pub_city:"):
+        if user_id != OWNER_CHAT_ID:
+            return
+        city = data.split(":", 1)[1]
+        publish_temp[user_id] = {"city": city}
+        try:
+            bot.edit_message_text(
+                f"📍 Город: <b>{city}</b>\n\n🔧 Введите <b>описание задачи</b>:",
+                call.message.chat.id,
+                call.message.message_id,
+                parse_mode="HTML"
+            )
+        except:
+            bot.send_message(user_id, f"📍 Город: {city}\n\n🔧 Введите описание задачи:")
+        bot.register_next_step_handler(call.message, pub_step_task)
+        return
+
+    if data == "pub_confirm":
+        if user_id != OWNER_CHAT_ID:
+            return
+        try:
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        except:
+            pass
+        _do_publish(user_id)
+        return
+
+    if data == "pub_cancel":
+        if user_id != OWNER_CHAT_ID:
+            return
+        publish_temp.pop(user_id, None)
+        try:
+            bot.edit_message_text("❌ Публикация отменена.", call.message.chat.id, call.message.message_id)
+        except:
+            pass
+        bot.send_message(user_id, "Отменено.", reply_markup=owner_menu_kb())
+        return
+
+    # ── Одобрить/отклонить заявку клиента ──
     if data.startswith("approve:"):
         order_id = data.split(":")[1]
-        # Обновляем статус через API — меняем на published
         try:
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
             bot.edit_message_text(
@@ -538,7 +688,7 @@ def callback_handler(call):
             )
         except:
             pass
-        bot.send_message(OWNER_CHAT_ID, f"✅ Заявка #{order_id} одобрена. Теперь опубликуйте её как заказ через «📋 Опубликовать заказ».")
+        bot.send_message(OWNER_CHAT_ID, f"✅ Заявка #{order_id} одобрена. Опубликуйте через «📋 Опубликовать заказ».")
         return
 
     if data.startswith("reject:"):
@@ -554,7 +704,7 @@ def callback_handler(call):
             pass
         return
 
-    # Рабочий принял заказ
+    # ── Рабочий принял заказ ──
     if data.startswith("take:"):
         order_id = data.split(":")[1]
         try:
@@ -563,7 +713,8 @@ def callback_handler(call):
             pass
         bot.send_message(
             user_id,
-            f"✅ <b>Вы взяли заказ #{order_id}</b>\n\nОткройте приложение чтобы увидеть детали и адрес:",
+            f"✅ <b>Вы взяли заказ #{order_id}</b>\n\n"
+            f"Откройте приложение чтобы увидеть детали:",
             parse_mode="HTML",
             reply_markup=open_app_inline_kb()
         )
@@ -574,7 +725,7 @@ def callback_handler(call):
         )
         return
 
-    # Подтверждение выезда
+    # ── Подтверждение выезда ──
     if data.startswith("confirm:"):
         order_id = data.split(":")[1]
         if key not in ratings:
@@ -597,7 +748,7 @@ def callback_handler(call):
         bot.send_message(OWNER_CHAT_ID, f"❌ <b>{key}</b> отказался от заказа #{order_id}", parse_mode="HTML")
         return
 
-    # Техподдержка inline
+    # ── Техподдержка ──
     if data.startswith("support_inline:"):
         msg = bot.send_message(user_id, "🆘 Опишите вашу проблему:")
         bot.register_next_step_handler(msg, support_handler)
@@ -619,7 +770,7 @@ def callback_handler(call):
         bot.send_message(OWNER_CHAT_ID, f"✉️ Введите сообщение для {users.get(str(worker_id), str(worker_id))}:")
         return
 
-    # Статистика навигация
+    # ── Навигация статистики ──
     if data.startswith("stats_page:"):
         page = int(data.split(":")[1])
         _send_stats_page(call.message.chat.id, page, for_owner=(user_id == OWNER_CHAT_ID))
@@ -632,7 +783,7 @@ def callback_handler(call):
             pass
         return
 
-    # Участники: пагинация и удаление
+    # ── Участники ──
     if data.startswith("participants_page:"):
         page = int(data.split(":")[1])
         try:
@@ -675,9 +826,11 @@ def _send_stats_page(chat_id, page=1, for_owner=False):
     total_pages = max(1, (len(items) + PAGE_SIZE - 1) // PAGE_SIZE)
     page = max(1, min(page, total_pages))
     sl = items[(page-1)*PAGE_SIZE : page*PAGE_SIZE]
+    medals = ["🥇", "🥈", "🥉"]
     out = f"🏆 <b>Рейтинг рабочих</b> — стр. {page}/{total_pages}\n\n"
     for i, (k, v) in enumerate(sl, start=(page-1)*PAGE_SIZE+1):
-        out += f"{i}. {k}: {v.get('score', 0)}⭐\n"
+        medal = medals[i-1] if i <= 3 else f"{i}."
+        out += f"{medal} {k}: {v.get('score', 0)}⭐\n"
     bot.send_message(chat_id, out, parse_mode="HTML", reply_markup=stats_nav_kb(page, total_pages))
 
 # ─────────────────────────────────────────
@@ -691,7 +844,7 @@ def _send_participants_page(chat_id, page=1):
     total_pages = max(1, (total + PP - 1) // PP)
     page = max(1, min(page, total_pages))
     sl = uids[(page-1)*PP : page*PP]
-    out = f"👥 <b>Участники</b> — стр. {page}/{total_pages}\n\n"
+    out = f"👥 <b>Участники</b> — стр. {page}/{total_pages} (всего: {total})\n\n"
     kb = InlineKeyboardMarkup()
     for uid in sl:
         disp  = users.get(uid, uid)
