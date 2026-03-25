@@ -174,9 +174,9 @@ def role_select_kb():
 
 def worker_main_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    kb.add(KeyboardButton("🚀 Открыть приложение"), KeyboardButton("ℹ️ О сервисе"))
-    kb.add(KeyboardButton("🔔 Включить уведомления"), KeyboardButton("🏆 Мой рейтинг"))
-    kb.add(KeyboardButton("🆘 Техподдержка"), KeyboardButton("↩️ Сменить роль"))
+    kb.add(KeyboardButton("🚀 Открыть приложение"), KeyboardButton("🏆 Мой рейтинг"))
+    kb.add(KeyboardButton("ℹ️ О сервисе"), KeyboardButton("🆘 Техподдержка"))
+    kb.add(KeyboardButton("↩️ Сменить роль"))
     return kb
 
 def customer_main_kb():
@@ -388,20 +388,6 @@ def handle_message(message):
             f"Выполняйте заявки чтобы расти в рейтинге!",
             parse_mode="HTML"
         )
-        return
-
-    if text == "🔔 Включить уведомления":
-        if chat_id in workers_stream_active:
-            bot.send_message(chat_id, "✅ Уведомления уже включены. Ждите новых заявок!")
-        else:
-            workers_stream_active.add(chat_id)
-            save_all()
-            bot.send_message(
-                chat_id,
-                "🔔 <b>Уведомления включены!</b>\n"
-                "Вы будете получать сообщения о новых заказах.",
-                parse_mode="HTML"
-            )
         return
 
     if text == "🆘 Техподдержка":
@@ -811,8 +797,11 @@ def _delete_user(uid):
 
 # ─────────────────────────────────────────
 # ВЕРСИОНИРОВАНИЕ И УВЕДОМЛЕНИЯ О НОВОВВЕДЕНИЯХ
+# При каждом обновлении кода: поднимаешь BOT_VERSION и
+# добавляешь текст в CHANGELOG — бот сам разошлёт всем
+# пользователям при перезапуске. Нажимать /start не нужно.
 # ─────────────────────────────────────────
-BOT_VERSION = "2.1.0"
+BOT_VERSION = "2.2.0"
 VERSION_FILE = "bot_version.json"
 
 CHANGELOG = {
@@ -825,13 +814,25 @@ CHANGELOG = {
         "• 🔔 Уведомления о новых заявках улучшены\n\n"
         "Спасибо что вы с нами! 💪"
     ),
+    "2.2.0": (
+        "🆕 <b>Обновление VSH Service v2.2</b>\n\n"
+        "• 📢 Уведомления о заявках теперь приходят мгновенно\n"
+        "• 🚀 Публикация заявок полностью через приложение\n"
+        "• 🔄 Автоматические обновления без перезапуска\n"
+        "• 🧹 Интерфейс бота упрощён и ускорен\n\n"
+        "Спасибо что вы с нами! 💪"
+    ),
 }
 
 def check_version_and_notify():
-    """Проверяем версию и уведомляем пользователей о нововведениях."""
+    """
+    При обновлении бота — автоматически рассылает changelog
+    ВСЕМ пользователям (из users.json). Не нужно нажимать /start.
+    Каждый пользователь получает уведомление ровно один раз.
+    """
     old_data = load_json(VERSION_FILE, {"version": "0.0.0", "notified": []})
     old_version = old_data.get("version", "0.0.0")
-    notified = set(old_data.get("notified", []))
+    already_notified = set(old_data.get("notified", []))
 
     if old_version == BOT_VERSION:
         return  # Версия не изменилась
@@ -843,21 +844,32 @@ def check_version_and_notify():
         save_json(VERSION_FILE, {"version": BOT_VERSION, "notified": []})
         return
 
-    # Рассылаем changelog всем активным рабочим
-    new_notified = []
-    for wid in list(workers_stream_active):
-        wid_str = str(wid)
-        if wid_str in notified:
-            new_notified.append(wid_str)
-            continue
+    # Собираем ВСЕХ пользователей: и из users.json, и из workers_stream_active
+    all_user_ids = set()
+    for uid in users:
+        if uid.isdigit():
+            all_user_ids.add(int(uid))
+    for wid in workers_stream_active:
+        all_user_ids.add(int(wid))
+
+    # Не шлём админу отдельно — он тоже в списке
+    new_notified = list(already_notified)
+    sent = 0
+
+    for uid in all_user_ids:
+        uid_str = str(uid)
+        if uid_str in already_notified:
+            continue  # Уже получил
         try:
-            bot.send_message(int(wid), changelog_text, parse_mode="HTML")
-            new_notified.append(wid_str)
-            logger.info("Changelog отправлен: %s", wid)
+            bot.send_message(int(uid), changelog_text, parse_mode="HTML")
+            new_notified.append(uid_str)
+            sent += 1
         except Exception as e:
-            logger.debug("Не удалось отправить changelog %s: %s", wid, e)
+            logger.debug("Changelog не отправлен %s: %s", uid, e)
+            new_notified.append(uid_str)  # Помечаем чтобы не спамить при следующем запуске
 
     save_json(VERSION_FILE, {"version": BOT_VERSION, "notified": new_notified})
+    logger.info("Changelog v%s разослан: %d из %d пользователей", BOT_VERSION, sent, len(all_user_ids))
 
 # ─────────────────────────────────────────
 # ЗАПУСК С ЗАЩИТОЙ ОТ ПАДЕНИЙ
