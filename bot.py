@@ -943,12 +943,105 @@ def _delete_user(uid):
     save_all()
 
 # ─────────────────────────────────────────
-# ЗАПУСК
+# ВЕРСИОНИРОВАНИЕ И УВЕДОМЛЕНИЯ О НОВОВВЕДЕНИЯХ
+# ─────────────────────────────────────────
+BOT_VERSION = "2.1.0"
+VERSION_FILE = "bot_version.json"
+
+CHANGELOG = {
+    "2.1.0": (
+        "🆕 <b>Обновление VSH Service v2.1</b>\n\n"
+        "• 🌐 Сайт для заказчиков запущен!\n"
+        "• ✏️ Админ может редактировать заявки\n"
+        "• ⛔ Антиспам-защита\n"
+        "• ↩️ Кнопка «Сменить роль»\n"
+        "• 🔔 Уведомления о новых заявках улучшены\n\n"
+        "Спасибо что вы с нами! 💪"
+    ),
+}
+
+def check_version_and_notify():
+    """Проверяем версию и уведомляем пользователей о нововведениях."""
+    old_data = load_json(VERSION_FILE, {"version": "0.0.0", "notified": []})
+    old_version = old_data.get("version", "0.0.0")
+    notified = set(old_data.get("notified", []))
+
+    if old_version == BOT_VERSION:
+        return  # Версия не изменилась
+
+    logger.info("Обновление: %s → %s", old_version, BOT_VERSION)
+
+    changelog_text = CHANGELOG.get(BOT_VERSION)
+    if not changelog_text:
+        save_json(VERSION_FILE, {"version": BOT_VERSION, "notified": []})
+        return
+
+    # Рассылаем changelog всем активным рабочим
+    new_notified = []
+    for wid in list(workers_stream_active):
+        wid_str = str(wid)
+        if wid_str in notified:
+            new_notified.append(wid_str)
+            continue
+        try:
+            bot.send_message(int(wid), changelog_text, parse_mode="HTML")
+            new_notified.append(wid_str)
+            logger.info("Changelog отправлен: %s", wid)
+        except Exception as e:
+            logger.debug("Не удалось отправить changelog %s: %s", wid, e)
+
+    save_json(VERSION_FILE, {"version": BOT_VERSION, "notified": new_notified})
+
+# ─────────────────────────────────────────
+# ЗАПУСК С ЗАЩИТОЙ ОТ ПАДЕНИЙ
 # ─────────────────────────────────────────
 if __name__ == "__main__":
-    logger.info("🚀 VSH Service Bot запущен")
+    logger.info("🚀 VSH Service Bot v%s запущен", BOT_VERSION)
     save_all()
+
+    # Уведомляем о нововведениях
     try:
-        bot.infinity_polling(timeout=60, long_polling_timeout=30)
+        check_version_and_notify()
     except Exception as e:
-        logger.exception("Ошибка polling: %s", e)
+        logger.exception("Ошибка уведомления о версии: %s", e)
+
+    # Бесконечный цикл с автоперезапуском при сбоях
+    MAX_RETRIES = 0  # 0 = бесконечно
+    retry_count = 0
+    retry_delay = 5  # секунд
+
+    while True:
+        try:
+            logger.info("Запуск polling...")
+            bot.infinity_polling(timeout=60, long_polling_timeout=30, allowed_updates=None)
+        except KeyboardInterrupt:
+            logger.info("Остановка по Ctrl+C")
+            break
+        except Exception as e:
+            retry_count += 1
+            logger.exception("Ошибка polling (попытка #%d): %s", retry_count, e)
+
+            # Уведомляем админа о падении
+            try:
+                bot.send_message(
+                    OWNER_CHAT_ID,
+                    f"⚠️ <b>Бот перезапускается</b>\n\n"
+                    f"Ошибка: <code>{str(e)[:200]}</code>\n"
+                    f"Попытка: #{retry_count}\n"
+                    f"Перезапуск через {retry_delay} сек...",
+                    parse_mode="HTML"
+                )
+            except:
+                pass
+
+            time.sleep(retry_delay)
+            # Увеличиваем задержку, но не больше 60 сек
+            retry_delay = min(60, retry_delay + 5)
+
+            if MAX_RETRIES > 0 and retry_count >= MAX_RETRIES:
+                logger.critical("Превышено кол-во попыток (%d). Остановка.", MAX_RETRIES)
+                break
+        else:
+            # Если polling завершился нормально — сбрасываем счётчик
+            retry_count = 0
+            retry_delay = 5
