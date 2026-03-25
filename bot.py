@@ -503,8 +503,78 @@ def _handle_owner(message, text, key):
 # ПУБЛИКАЦИЯ ЗАЯВОК
 # Вся публикация заявок происходит через Mini App (админ-панель).
 # Бот — только входной ресепшн: уведомления, выбор роли, техподдержка.
-# Рассылка рабочим происходит автоматически через API (order.js).
+# Бот сам проверяет новые заявки через API и рассылает уведомления.
 # ─────────────────────────────────────────
+
+# Множество ID заявок, о которых уже разослали уведомления
+NOTIFIED_ORDERS_FILE = "notified_orders.json"
+notified_orders = set(load_json(NOTIFIED_ORDERS_FILE, []))
+
+def save_notified():
+    save_json(NOTIFIED_ORDERS_FILE, list(notified_orders))
+
+def check_new_orders():
+    """Проверяет новые заявки со статусом published и рассылает уведомления."""
+    try:
+        r = requests.get(f"{API_BASE}/api/order?status=published", timeout=10)
+        orders = r.json()
+    except Exception as e:
+        logger.debug("check_new_orders error: %s", e)
+        return
+
+    if not isinstance(orders, list):
+        return
+
+    for order in orders:
+        oid = order.get("id")
+        if not oid or oid in notified_orders:
+            continue
+
+        # Новая заявка — рассылаем всем исполнителям
+        notified_orders.add(oid)
+
+        city    = order.get("city", "Октябрьский")
+        task    = order.get("service") or order.get("task") or "Задача"
+        address = order.get("address", "")
+        workers = order.get("workers_needed", 1)
+        comment = order.get("comment", "")
+
+        msg_text = (
+            f"🔥 <b>НОВАЯ ЗАЯВКА №{oid}</b>\n\n"
+            f"📍 {city}\n"
+            f"🔧 {task}\n"
+            f"🏠 {address}\n"
+            f"👷 Рабочих: {workers}\n"
+            + (f"💬 {comment}\n" if comment else "")
+            + f"\nОткройте приложение чтобы принять заказ 👇"
+        )
+
+        sent = 0
+        for wid in list(workers_stream_active):
+            try:
+                bot.send_message(
+                    int(wid),
+                    msg_text,
+                    parse_mode="HTML",
+                    reply_markup=open_app_inline_kb()
+                )
+                sent += 1
+            except Exception as e:
+                logger.debug("Уведомление не отправлено %s: %s", wid, e)
+
+        logger.info("📢 Заявка #%s: уведомления отправлены %d рабочим", oid, sent)
+
+    save_notified()
+
+def order_watcher():
+    """Фоновый поток: проверяет новые заявки каждые 10 секунд."""
+    logger.info("🔔 Order watcher запущен")
+    while True:
+        try:
+            check_new_orders()
+        except Exception as e:
+            logger.debug("order_watcher error: %s", e)
+        time.sleep(10)
 
 # ─────────────────────────────────────────
 # ТЕХПОДДЕРЖКА
@@ -801,6 +871,11 @@ if __name__ == "__main__":
         check_version_and_notify()
     except Exception as e:
         logger.exception("Ошибка уведомления о версии: %s", e)
+
+    # Запускаем фоновый поток проверки новых заявок
+    watcher_thread = threading.Thread(target=order_watcher, daemon=True)
+    watcher_thread.start()
+    logger.info("🔔 Фоновая проверка заявок запущена (каждые 10 сек)")
 
     # Бесконечный цикл с автоперезапуском при сбоях
     MAX_RETRIES = 0  # 0 = бесконечно
