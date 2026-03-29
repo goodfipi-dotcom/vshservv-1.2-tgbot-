@@ -343,7 +343,9 @@ def handle_message(message):
             chat_id,
             "✅ <b>Режим исполнителя активирован!</b>\n\n"
             "🔔 Уведомления о новых заявках включены автоматически.\n\n"
-            "Нажмите «🚀 Открыть приложение» чтобы войти в систему.",
+            "🔐 Для входа в приложение нужен <b>PIN-код</b>.\n"
+            "Если у вас нет кода — напишите в 🆘 <b>Техподдержку</b> слово <code>код</code> и мы вышлем его.\n\n"
+            "Нажмите «🚀 Открыть приложение» чтобы войти.",
             parse_mode="HTML",
             reply_markup=worker_main_kb()
         )
@@ -578,6 +580,19 @@ def support_handler(message):
     if not text:
         bot.send_message(worker_id, "❌ Пустое сообщение. Попробуйте снова через кнопку техподдержки.")
         return
+
+    # Автоответ на запрос PIN-кода
+    if text.lower().strip() in ["код", "pin", "пин", "код доступа", "пароль"]:
+        bot.send_message(
+            worker_id,
+            f"🔐 <b>PIN-код для входа в приложение:</b>\n\n"
+            f"<code>{WORKER_PIN}</code>\n\n"
+            f"Введите его на экране входа в Mini App.\n"
+            f"Никому не передавайте код!",
+            parse_mode="HTML"
+        )
+        return
+
     try:
         kb = InlineKeyboardMarkup()
         kb.add(InlineKeyboardButton("✉️ Ответить", callback_data=f"support_reply:{worker_id}"))
