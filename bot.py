@@ -17,11 +17,17 @@ from telebot.types import (
 # ─────────────────────────────────────────
 # НАСТРОЙКИ
 # ─────────────────────────────────────────
-TOKEN         = os.getenv("TG_BOT_TOKEN", "8796585755:AAH3inuCnhQfKI7rT-AEh1zNfOSXDffIKyo")
-OWNER_CHAT_ID = int(os.getenv("OWNER_CHAT_ID", "7693616720"))
+TOKEN         = os.getenv("TG_BOT_TOKEN")
+OWNER_CHAT_ID = int(os.getenv("OWNER_CHAT_ID", "0"))
+
+if not TOKEN:
+    raise ValueError("❌ TG_BOT_TOKEN не установлен! Добавьте в переменные окружения.")
+if not OWNER_CHAT_ID:
+    raise ValueError("❌ OWNER_CHAT_ID не установлен! Добавьте в переменные окружения.")
 MINI_APP_URL  = os.getenv("MINI_APP_URL", "https://mini-appsvsh.vercel.app")
 API_BASE      = os.getenv("API_BASE",     "https://mini-appsvsh.vercel.app")
 CLIENT_URL    = os.getenv("CLIENT_URL",   "https://mini-appsvsh.vercel.app/client.html")
+WORKER_PIN    = os.getenv("WORKER_PIN",   "2026")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -325,7 +331,7 @@ def handle_message(message):
         try:
             user_obj = message.from_user
             api_post("/api/worker-auth", {
-                "password": "2026",
+                "password": WORKER_PIN,
                 "telegram_id": chat_id,
                 "first_name": user_obj.first_name or "Рабочий",
                 "telegram_username": user_obj.username or ""
