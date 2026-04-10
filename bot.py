@@ -7,6 +7,21 @@ import logging
 from datetime import datetime, timedelta
 from urllib.parse import quote_plus, unquote_plus
 
+# ─────────────────────────────────────────
+# ФИКС СЕТИ: принудительный IPv4 + увеличенные таймауты
+# Причина: на ряде хостингов (BotHost и пр.) в контейнере нет
+# IPv6-маршрута. api.telegram.org отдаёт AAAA-запись, python
+# берёт её первой → ядро возвращает ENETUNREACH (Errno 101)
+# "Network is unreachable" ещё до установления TCP-соединения.
+# Патч форсит резолв только в IPv4 — должен стоять ДО импорта
+# requests/telebot, чтобы их сессии подхватили патченный сокет.
+# ─────────────────────────────────────────
+import socket as _socket_mod
+_orig_getaddrinfo = _socket_mod.getaddrinfo
+def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    return _orig_getaddrinfo(host, port, _socket_mod.AF_INET, type, proto, flags)
+_socket_mod.getaddrinfo = _ipv4_only_getaddrinfo
+
 import requests
 import telebot
 from telebot.types import (
