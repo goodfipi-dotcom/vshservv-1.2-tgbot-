@@ -76,8 +76,21 @@ def save_json(path, data):
 
 ratings  = load_json(RATINGS_FILE, {})
 users    = load_json(USERS_FILE, {})
-_wlist   = load_json(WORKERS_FILE, [])
-workers_stream_active = set(int(x) for x in _wlist if str(x).isdigit())
+
+# Список рабочих для рассылки теперь живёт в базе, а не в workers.json.
+# Раньше файл терялся при перезапуске и заявка уходила трём людям вместо сорока шести.
+# Объект ведёт себя как прежнее множество (add / discard / in / len), поэтому остальной код не менялся.
+import db
+workers_stream_active = db.WorkerRegistry()
+
+# Разовый перенос старого файла в базу — чтобы не потерять тех, кто уже был подписан
+_legacy = load_json(WORKERS_FILE, [])
+if _legacy:
+    for _wid in _legacy:
+        workers_stream_active.add(_wid)
+    save_json(WORKERS_FILE + ".migrated", _legacy)
+    save_json(WORKERS_FILE, [])
+    logger.info("Перенесено в базу из workers.json: %d чел.", len(_legacy))
 
 # ─────────────────────────────────────────
 # СТЕЙТЫ
@@ -159,8 +172,8 @@ def is_banned(uid):
         return str(uid) in banned_users
 
 def save_all():
+    # workers.json больше не пишем: список рабочих хранится в базе
     save_json(RATINGS_FILE, ratings)
-    save_json(WORKERS_FILE, list(workers_stream_active))
     save_json(USERS_FILE, users)
 
 def register_user(user):
@@ -175,6 +188,8 @@ def register_user(user):
     if k not in ratings:
         ratings[k] = {"score": 0}
         save_json(RATINGS_FILE, ratings)
+    # дублируем в базу — она источник истины
+    db.register_user(user.id, getattr(user, "first_name", "") or "", getattr(user, "username", "") or "")
     return k
 
 def api_post(endpoint, data):
@@ -515,15 +530,16 @@ def _handle_owner(message, text, key):
 # Бот сам проверяет новые заявки через API и рассылает уведомления.
 # ─────────────────────────────────────────
 
-# Множество ID заявок, о которых уже разослали уведомления
+# Какие заявки уже разосланы — помним в базе, а не в файле.
+# Файл терялся при перезапуске, и бот рассылал одни и те же заявки заново.
 NOTIFIED_ORDERS_FILE = "notified_orders.json"
-notified_orders = set(load_json(NOTIFIED_ORDERS_FILE, []))
+notified_orders = set()
 
 def save_notified():
-    save_json(NOTIFIED_ORDERS_FILE, list(notified_orders))
+    pass  # ведётся в базе, таблица notifications
 
 def check_new_orders():
-    """Проверяет новые заявки со статусом published и рассылает уведомления."""
+    """Проверяет новые опубликованные заявки и рассылает подходящим рабочим."""
     try:
         r = requests.get(f"{API_BASE}/api/order?status=published", timeout=10)
         orders = r.json()
@@ -538,8 +554,10 @@ def check_new_orders():
         oid = order.get("id")
         if not oid or oid in notified_orders:
             continue
+        if db.was_notified(oid, "new_order"):
+            notified_orders.add(oid)
+            continue
 
-        # Новая заявка — рассылаем всем исполнителям
         notified_orders.add(oid)
 
         city    = order.get("city", "Октябрьский")
@@ -547,6 +565,7 @@ def check_new_orders():
         address = order.get("address", "")
         workers = order.get("workers_needed", 1)
         comment = order.get("comment", "")
+        pay     = order.get("worker_price") or 0
 
         msg_text = (
             f"🔥 <b>НОВАЯ ЗАЯВКА №{oid}</b>\n\n"
@@ -554,24 +573,42 @@ def check_new_orders():
             f"🔧 {task}\n"
             f"🏠 {address}\n"
             f"👷 Рабочих: {workers}\n"
+            + (f"💰 Оплата рабочему: {pay} ₽\n" if pay else "")
             + (f"💬 {comment}\n" if comment else "")
             + f"\nОткройте приложение чтобы принять заказ 👇"
         )
 
-        sent = 0
-        for wid in list(workers_stream_active):
+        recipients = workers_stream_active.recipients_for(
+            city_id=order.get("city_id"),
+            service_id=order.get("service_id"),
+        )
+
+        sent, failed = 0, []
+        for wid in recipients:
+            try:
+                bot.send_message(int(wid), msg_text, parse_mode="HTML", reply_markup=open_app_inline_kb())
+                sent += 1
+                db.log_notification(oid, wid, "new_order", "sent")
+            except Exception as e:
+                failed.append((wid, str(e)))
+                db.log_notification(oid, wid, "new_order", "failed", error=str(e))
+
+        logger.info("📢 Заявка #%s: доставлено %d из %d", oid, sent, len(recipients))
+        db.log_order_event(oid, "broadcast", "bot", "system", f"доставлено {sent} из {len(recipients)}")
+
+        # Молчать о недоставке нельзя — владелец должен знать, что заявку никто не увидел
+        if OWNER_CHAT_ID and (sent == 0 or failed):
+            lines = "\n".join(f"• {w}: {err[:60]}" for w, err in failed[:5])
             try:
                 bot.send_message(
-                    int(wid),
-                    msg_text,
+                    OWNER_CHAT_ID,
+                    f"⚠️ <b>Заявка №{oid}</b>: доставлено {sent} из {len(recipients)}."
+                    + (f"\n\nНе дошло:\n{lines}" if lines else "")
+                    + ("\n\n<b>Заявку не увидел никто.</b>" if sent == 0 else ""),
                     parse_mode="HTML",
-                    reply_markup=open_app_inline_kb()
                 )
-                sent += 1
             except Exception as e:
-                logger.debug("Уведомление не отправлено %s: %s", wid, e)
-
-        logger.info("📢 Заявка #%s: уведомления отправлены %d рабочим", oid, sent)
+                logger.error("не смог доложить владельцу о недоставке: %s", e)
 
     save_notified()
 
