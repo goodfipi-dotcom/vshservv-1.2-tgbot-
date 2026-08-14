@@ -285,8 +285,8 @@ ABOUT_WORKER = (
     "⭐ <b>Рейтинг и звания:</b>\n"
     "За каждый заказ вы получаете звёзды. Чем больше звёзд — "
     "тем выше звание и доступ к лучшим заявкам.\n\n"
-    "💰 <b>Без посредников:</b>\n"
-    "Вся оплата идёт напрямую вам от заказчика.\n\n"
+    "💰 <b>Оплата:</b>\n"
+    "Сумма по заявке известна заранее — вы видите её до того, как принять заказ.\n\n"
     "🆘 По вопросам: кнопка «Техподдержка»"
 )
 
@@ -307,10 +307,30 @@ ABOUT_CUSTOMER = (
 # ─────────────────────────────────────────
 # /start — выбор роли
 # ─────────────────────────────────────────
+def ensure_app_button(chat_id):
+    """
+    Ставим кнопку «Открыть VSH» рядом с полем ввода лично этому человеку.
+    Общая настройка через BotFather применяется не всем и не сразу,
+    а персональная — срабатывает всегда.
+    """
+    try:
+        bot.set_chat_menu_button(
+            chat_id,
+            telebot.types.MenuButtonWebApp(
+                type="web_app",
+                text="Открыть VSH",
+                web_app=telebot.types.WebAppInfo(url=MINI_APP_URL),
+            ),
+        )
+    except Exception as e:
+        logger.debug("кнопка приложения не поставилась для %s: %s", chat_id, e)
+
+
 @bot.message_handler(commands=["start"])
 def cmd_start(message):
     register_user(message.from_user)
     chat_id = message.chat.id
+    ensure_app_button(chat_id)
 
     if chat_id == OWNER_CHAT_ID:
         bot.send_message(
@@ -321,14 +341,18 @@ def cmd_start(message):
         )
         return
 
+    # Кнопка «Открыть приложение» идёт сразу — вход без кодов и паролей
     bot.send_message(
         chat_id,
         "👋 Добро пожаловать в <b>VSH Service</b>!\n\n"
         "Мы помогаем найти работу и нанять рабочих "
-        "в Октябрьском и Туймазах.\n\nКто вы?",
+        "в Октябрьском и Туймазах.\n\n"
+        "Нажмите кнопку ниже, чтобы открыть приложение — заявки внутри.",
         parse_mode="HTML",
-        reply_markup=role_select_kb()
+        reply_markup=open_app_inline_kb()
     )
+
+    bot.send_message(chat_id, "Кто вы?", reply_markup=role_select_kb())
 
 # ─────────────────────────────────────────
 # ГЛАВНЫЙ ОБРАБОТЧИК СООБЩЕНИЙ

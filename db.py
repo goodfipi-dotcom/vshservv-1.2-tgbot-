@@ -33,24 +33,31 @@ def _connect():
 
 @contextmanager
 def cursor(dict_rows=False):
-    """Курсор с автоматическим переподключением при обрыве связи."""
+    """
+    Курсор к базе. Переподключение делается ДО yield — повторять yield нельзя,
+    генератор-контекстменеджер отдаёт значение ровно один раз.
+    """
+    global _conn
     with _lock:
-        for attempt in (1, 2):
+        try:
+            conn = _connect()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            _conn = None
+            conn = _connect()  # одна повторная попытка: база могла уснуть
+
+        factory = psycopg2.extras.RealDictCursor if dict_rows else None
+        cur = conn.cursor(cursor_factory=factory)
+        try:
+            yield cur
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            _conn = None  # соединение испорчено — следующий вызов поднимет новое
+            logger.error("обрыв связи с базой: %s", e)
+            raise
+        finally:
             try:
-                conn = _connect()
-                factory = psycopg2.extras.RealDictCursor if dict_rows else None
-                cur = conn.cursor(cursor_factory=factory)
-                try:
-                    yield cur
-                finally:
-                    cur.close()
-                return
-            except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
-                global _conn
-                _conn = None
-                if attempt == 2:
-                    logger.error("БД недоступна: %s", e)
-                    raise
+                cur.close()
+            except Exception:
+                pass
 
 
 class WorkerRegistry:
