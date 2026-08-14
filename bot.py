@@ -210,11 +210,7 @@ def role_select_kb():
 def worker_main_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     # Кнопка сама открывает приложение — без промежуточного сообщения
-    kb.add(
-        KeyboardButton("🚀 Открыть приложение",
-                       web_app=telebot.types.WebAppInfo(url=MINI_APP_URL)),
-        KeyboardButton("🏆 Мой рейтинг"),
-    )
+    kb.add(KeyboardButton("🚀 Открыть приложение"), KeyboardButton("🏆 Мой рейтинг"))
     kb.add(KeyboardButton("ℹ️ О сервисе"), KeyboardButton("🆘 Техподдержка"))
     kb.add(KeyboardButton("↩️ Сменить роль"))
     return kb
@@ -228,11 +224,7 @@ def customer_main_kb():
 
 def owner_menu_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    kb.add(
-        KeyboardButton("🚀 Открыть приложение",
-                       web_app=telebot.types.WebAppInfo(url=MINI_APP_URL)),
-        KeyboardButton("📊 Рейтинг рабочих"),
-    )
+    kb.add(KeyboardButton("🚀 Открыть приложение"), KeyboardButton("📊 Рейтинг рабочих"))
     kb.add(KeyboardButton("👥 Участники"),           KeyboardButton("📣 Рассылка всем"))
     kb.add(KeyboardButton("📨 Написать рабочему"),   KeyboardButton("ℹ️ О сервисе"))
     return kb
@@ -244,17 +236,21 @@ def open_app_inline_kb(chat_id=None):
     например, в десктопной версии. Она открывает приложение в браузере и пускает без кода.
     """
     kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton(
-        "🚀 Открыть VSH Service",
-        web_app=telebot.types.WebAppInfo(url=MINI_APP_URL)
-    ))
+
+    # Персональная ссылка — основной путь: работает на любом телефоне и в любом браузере
     if chat_id:
         token = db.create_login_token(chat_id)
         if token:
             kb.add(InlineKeyboardButton(
-                "🔗 Открыть по ссылке (если не открылось)",
+                "🚀 Открыть приложение",
                 url=f"{MINI_APP_URL}/?t={token}"
             ))
+
+    # Встроенное окно Telegram — запасной путь, работает не на всех устройствах
+    kb.add(InlineKeyboardButton(
+        "📲 Открыть внутри Telegram",
+        web_app=telebot.types.WebAppInfo(url=MINI_APP_URL)
+    ))
     return kb
 
 def accept_order_inline(order_id):
@@ -346,6 +342,19 @@ def ensure_app_button(chat_id):
         logger.debug("кнопка приложения не поставилась для %s: %s", chat_id, e)
 
 
+@bot.message_handler(commands=["vhod", "login", "app", "vojti"])
+def cmd_login(message):
+    """Свежая ссылка входа по команде — на случай, если кнопки потерялись."""
+    register_user(message.from_user)
+    chat_id = message.chat.id
+    bot.send_message(
+        chat_id,
+        "🔑 <b>Вход в приложение</b>\n\nНажмите кнопку — откроется ваше рабочее приложение.",
+        parse_mode="HTML",
+        reply_markup=open_app_inline_kb(chat_id)
+    )
+
+
 @bot.message_handler(commands=["start"])
 def cmd_start(message):
     register_user(message.from_user)
@@ -433,7 +442,11 @@ def handle_message(message):
 
     # ── ОБЩИЕ КНОПКИ ──
     if text == "🚀 Открыть приложение":
-        bot.send_message(chat_id, "Нажмите кнопку ниже 👇", reply_markup=open_app_inline_kb(chat_id))
+        bot.send_message(
+            chat_id,
+            "👇 Нажмите «Открыть приложение» — оно откроется и сразу пустит вас внутрь.\n\nСсылка личная, работает 30 минут. После первого входа приложение запомнит вас и будет открываться само.",
+            reply_markup=open_app_inline_kb(chat_id)
+        )
         return
 
     if text == "🌐 Оставить заявку на сайте":
@@ -527,7 +540,11 @@ def _handle_owner(message, text, key):
     # ── КНОПКИ АДМИНА ──
 
     if text == "🚀 Открыть приложение":
-        bot.send_message(chat_id, "Нажмите кнопку 👇", reply_markup=open_app_inline_kb(chat_id))
+        bot.send_message(
+            chat_id,
+            "👇 Нажмите «Открыть приложение».",
+            reply_markup=open_app_inline_kb(chat_id)
+        )
         return
 
     if text == "📊 Рейтинг рабочих":
