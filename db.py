@@ -227,3 +227,24 @@ def all_known_users():
             return [row[0] for row in cur.fetchall()]
     except Exception:
         return []
+
+
+# ── Вход по персональной ссылке ──────────────────────────────────────────
+# Telegram Desktop не всегда передаёт приложению подпись пользователя,
+# поэтому бот выдаёт одноразовый ключ: он открывает приложение где угодно.
+
+def create_login_token(telegram_id, minutes=30):
+    """Создаёт одноразовый ключ входа. Возвращает строку ключа или None."""
+    import secrets
+    token = secrets.token_urlsafe(24)
+    try:
+        with cursor() as cur:
+            cur.execute(
+                """INSERT INTO login_tokens (token, worker_id, expires_at)
+                   VALUES (%s, %s, NOW() + (%s || ' minutes')::interval)""",
+                (token, str(telegram_id), str(minutes)),
+            )
+        return token
+    except Exception as e:
+        logger.error("не удалось создать ключ входа для %s: %s", telegram_id, e)
+        return None

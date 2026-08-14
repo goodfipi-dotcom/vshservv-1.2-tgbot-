@@ -237,12 +237,24 @@ def owner_menu_kb():
     kb.add(KeyboardButton("📨 Написать рабочему"),   KeyboardButton("ℹ️ О сервисе"))
     return kb
 
-def open_app_inline_kb():
+def open_app_inline_kb(chat_id=None):
+    """
+    Две кнопки входа: обычная (внутри Telegram) и персональная ссылка.
+    Ссылка нужна там, где Telegram не передаёт приложению данные пользователя —
+    например, в десктопной версии. Она открывает приложение в браузере и пускает без кода.
+    """
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton(
         "🚀 Открыть VSH Service",
         web_app=telebot.types.WebAppInfo(url=MINI_APP_URL)
     ))
+    if chat_id:
+        token = db.create_login_token(chat_id)
+        if token:
+            kb.add(InlineKeyboardButton(
+                "🔗 Открыть по ссылке (если не открылось)",
+                url=f"{MINI_APP_URL}/?t={token}"
+            ))
     return kb
 
 def accept_order_inline(order_id):
@@ -357,7 +369,7 @@ def cmd_start(message):
         "в Октябрьском и Туймазах.\n\n"
         "Нажмите кнопку ниже, чтобы открыть приложение — заявки внутри.",
         parse_mode="HTML",
-        reply_markup=open_app_inline_kb()
+        reply_markup=open_app_inline_kb(chat_id)
     )
 
     bot.send_message(chat_id, "Кто вы?", reply_markup=role_select_kb())
@@ -421,7 +433,7 @@ def handle_message(message):
 
     # ── ОБЩИЕ КНОПКИ ──
     if text == "🚀 Открыть приложение":
-        bot.send_message(chat_id, "Нажмите кнопку ниже 👇", reply_markup=open_app_inline_kb())
+        bot.send_message(chat_id, "Нажмите кнопку ниже 👇", reply_markup=open_app_inline_kb(chat_id))
         return
 
     if text == "🌐 Оставить заявку на сайте":
@@ -515,7 +527,7 @@ def _handle_owner(message, text, key):
     # ── КНОПКИ АДМИНА ──
 
     if text == "🚀 Открыть приложение":
-        bot.send_message(chat_id, "Нажмите кнопку 👇", reply_markup=open_app_inline_kb())
+        bot.send_message(chat_id, "Нажмите кнопку 👇", reply_markup=open_app_inline_kb(chat_id))
         return
 
     if text == "📊 Рейтинг рабочих":
@@ -612,7 +624,7 @@ def check_new_orders():
         sent, failed = 0, []
         for wid in recipients:
             try:
-                bot.send_message(int(wid), msg_text, parse_mode="HTML", reply_markup=open_app_inline_kb())
+                bot.send_message(int(wid), msg_text, parse_mode="HTML", reply_markup=open_app_inline_kb(int(wid)))
                 sent += 1
                 db.log_notification(oid, wid, "new_order", "sent")
             except Exception as e:
@@ -667,7 +679,7 @@ def support_handler(message):
             "🔓 Код больше не нужен.\n\n"
             "Нажмите кнопку ниже — приложение узнает вас по вашему Telegram и откроется сразу.",
             parse_mode="HTML",
-            reply_markup=open_app_inline_kb()
+            reply_markup=open_app_inline_kb(user_id)
         )
         return
 
@@ -738,7 +750,7 @@ def callback_handler(call):
             f"✅ <b>Вы взяли заказ #{order_id}</b>\n\n"
             f"Откройте приложение чтобы увидеть детали:",
             parse_mode="HTML",
-            reply_markup=open_app_inline_kb()
+            reply_markup=open_app_inline_kb(user_id)
         )
         bot.send_message(
             OWNER_CHAT_ID,
