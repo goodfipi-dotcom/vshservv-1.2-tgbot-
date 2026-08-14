@@ -41,8 +41,7 @@ if not OWNER_CHAT_ID:
     raise ValueError("❌ OWNER_CHAT_ID не установлен! Добавьте в переменные окружения.")
 MINI_APP_URL  = os.getenv("MINI_APP_URL", "https://mini-appsvsh.vercel.app")
 API_BASE      = os.getenv("API_BASE",     "https://mini-appsvsh.vercel.app")
-CLIENT_URL    = os.getenv("CLIENT_URL",   "https://mini-appsvsh.vercel.app/client.html")
-WORKER_PIN    = os.getenv("WORKER_PIN",   "2026")
+CLIENT_URL    = os.getenv("CLIENT_URL",   "https://vsh-web.vercel.app")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -210,7 +209,12 @@ def role_select_kb():
 
 def worker_main_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    kb.add(KeyboardButton("🚀 Открыть приложение"), KeyboardButton("🏆 Мой рейтинг"))
+    # Кнопка сама открывает приложение — без промежуточного сообщения
+    kb.add(
+        KeyboardButton("🚀 Открыть приложение",
+                       web_app=telebot.types.WebAppInfo(url=MINI_APP_URL)),
+        KeyboardButton("🏆 Мой рейтинг"),
+    )
     kb.add(KeyboardButton("ℹ️ О сервисе"), KeyboardButton("🆘 Техподдержка"))
     kb.add(KeyboardButton("↩️ Сменить роль"))
     return kb
@@ -224,7 +228,11 @@ def customer_main_kb():
 
 def owner_menu_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    kb.add(KeyboardButton("🚀 Открыть приложение"), KeyboardButton("📊 Рейтинг рабочих"))
+    kb.add(
+        KeyboardButton("🚀 Открыть приложение",
+                       web_app=telebot.types.WebAppInfo(url=MINI_APP_URL)),
+        KeyboardButton("📊 Рейтинг рабочих"),
+    )
     kb.add(KeyboardButton("👥 Участники"),           KeyboardButton("📣 Рассылка всем"))
     kb.add(KeyboardButton("📨 Написать рабочему"),   KeyboardButton("ℹ️ О сервисе"))
     return kb
@@ -378,28 +386,22 @@ def handle_message(message):
     # ── ВЫБОР РОЛИ ──
     if text == "👷 Я исполнитель":
         user_roles[chat_id] = "worker"
-        workers_stream_active.add(chat_id)
+        workers_stream_active.add(chat_id)  # запись в базу + включение уведомлений
         save_all()
 
-        # Регистрируем рабочего в БД через API (чтобы получал уведомления при публикации через Mini App)
-        try:
-            user_obj = message.from_user
-            api_post("/api/worker-auth", {
-                "password": WORKER_PIN,
-                "telegram_id": chat_id,
-                "first_name": user_obj.first_name or "Рабочий",
-                "telegram_username": user_obj.username or ""
-            })
-        except:
-            pass
+        user_obj = message.from_user
+        db.register_user(
+            chat_id,
+            getattr(user_obj, "first_name", "") or "Рабочий",
+            getattr(user_obj, "username", "") or "",
+        )
+        ensure_app_button(chat_id)
 
         bot.send_message(
             chat_id,
-            "✅ <b>Режим исполнителя активирован!</b>\n\n"
-            "🔔 Уведомления о новых заявках включены автоматически.\n\n"
-            "🔐 Для входа в приложение нужен <b>PIN-код</b>.\n"
-            "Если у вас нет кода — напишите в 🆘 <b>Техподдержку</b> слово <code>код</code> и мы вышлем его.\n\n"
-            "Нажмите «🚀 Открыть приложение» чтобы войти.",
+            "✅ <b>Режим исполнителя включён</b>\n\n"
+            "🔔 Уведомления о новых заявках приходят сюда.\n\n"
+            "Нажмите «🚀 Открыть приложение» — вход по вашему Telegram, код не нужен.",
             parse_mode="HTML",
             reply_markup=worker_main_kb()
         )
@@ -657,15 +659,15 @@ def support_handler(message):
         bot.send_message(worker_id, "❌ Пустое сообщение. Попробуйте снова через кнопку техподдержки.")
         return
 
-    # Автоответ на запрос PIN-кода
+    # Кодов больше нет — если человек их спрашивает, объясняем и даём кнопку входа
     if text.lower().strip() in ["код", "pin", "пин", "код доступа", "пароль"]:
+        ensure_app_button(worker_id)
         bot.send_message(
             worker_id,
-            f"🔐 <b>PIN-код для входа в приложение:</b>\n\n"
-            f"<code>{WORKER_PIN}</code>\n\n"
-            f"Введите его на экране входа в Mini App.\n"
-            f"Никому не передавайте код!",
-            parse_mode="HTML"
+            "🔓 Код больше не нужен.\n\n"
+            "Нажмите кнопку ниже — приложение узнает вас по вашему Telegram и откроется сразу.",
+            parse_mode="HTML",
+            reply_markup=open_app_inline_kb()
         )
         return
 
