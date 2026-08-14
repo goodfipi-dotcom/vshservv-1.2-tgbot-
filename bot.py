@@ -237,7 +237,8 @@ def open_app_inline_kb(chat_id=None):
     """
     kb = InlineKeyboardMarkup()
 
-    # Персональная ссылка — основной путь: работает на любом телефоне и в любом браузере
+    # Только персональная ссылка. Встроенное окно Telegram убрано:
+    # оно открывалось не на всех устройствах и висело на загрузке.
     if chat_id:
         token = db.create_login_token(chat_id)
         if token:
@@ -245,12 +246,10 @@ def open_app_inline_kb(chat_id=None):
                 "🚀 Открыть приложение",
                 url=f"{MINI_APP_URL}/?t={token}"
             ))
+            return kb
 
-    # Встроенное окно Telegram — запасной путь, работает не на всех устройствах
-    kb.add(InlineKeyboardButton(
-        "📲 Открыть внутри Telegram",
-        web_app=telebot.types.WebAppInfo(url=MINI_APP_URL)
-    ))
+    # Ключ не выдался (нет связи с базой) — даём обычную ссылку, там попросят войти заново
+    kb.add(InlineKeyboardButton("🚀 Открыть приложение", url=MINI_APP_URL))
     return kb
 
 def accept_order_inline(order_id):
@@ -325,21 +324,17 @@ ABOUT_CUSTOMER = (
 # ─────────────────────────────────────────
 def ensure_app_button(chat_id):
     """
-    Ставим кнопку «Открыть VSH» рядом с полем ввода лично этому человеку.
-    Общая настройка через BotFather применяется не всем и не сразу,
-    а персональная — срабатывает всегда.
+    Убираем кнопку встроенного окна Telegram рядом с полем ввода.
+    Она открывала приложение способом, который работает не на всех устройствах —
+    вместо неё вход идёт по ссылке из сообщения.
     """
     try:
         bot.set_chat_menu_button(
             chat_id,
-            telebot.types.MenuButtonWebApp(
-                type="web_app",
-                text="Открыть VSH",
-                web_app=telebot.types.WebAppInfo(url=MINI_APP_URL),
-            ),
+            telebot.types.MenuButtonCommands(type="commands"),
         )
     except Exception as e:
-        logger.debug("кнопка приложения не поставилась для %s: %s", chat_id, e)
+        logger.debug("кнопка меню не сброшена для %s: %s", chat_id, e)
 
 
 @bot.message_handler(commands=["vhod", "login", "app", "vojti"])
